@@ -1,0 +1,4 @@
+To keep things clear, I think changes to kernel source should go inside kernel/
+and the modified files should have the same path with regards to the kernel
+source tree. Keeping kernel changes under kernel/ allows us to expand later if
+we want to modify or keep some other code in the repo.
