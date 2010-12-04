@@ -5,3 +5,6 @@ we want to modify or keep some other code in the repo.
 
 I agree. It might not be the end of the world if we just put an entire kernel source tree in the repo. That way we can easily build a kernel for the client. We'll have to copy over whatever we need to the OpenWrt stuff -- not the end of the world.
 And I'm just modifying this so I can get used to git... -jb
+
+Name functions with a "cs5271_" prefix to make finding things easy later. After
+that, follow the naming conventions of the kernel.
