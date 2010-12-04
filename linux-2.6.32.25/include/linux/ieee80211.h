@@ -590,6 +590,15 @@ struct ieee80211_mgmt {
 			__le16 reason_code;
 		} __attribute__ ((packed)) disassoc;
 		struct {
+			/* Intentionally empty. */
+		} verif;
+		struct {
+			/* The AP promises not to deauthenticate you for at least
+			 * no_deauth_until beacon intervals.
+			 */
+			__le16 no_deauth_until;
+		} verif_resp;
+		struct {
 			__le64 timestamp;
 			__le16 beacon_int;
 			__le16 capab_info;
