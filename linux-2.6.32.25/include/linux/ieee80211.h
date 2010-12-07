@@ -18,6 +18,8 @@
 #include <linux/types.h>
 #include <asm/byteorder.h>
 
+#define CS5271
+
 /*
  * DS bit usage
  *
@@ -68,8 +70,10 @@
 #define IEEE80211_STYPE_AUTH		0x00B0
 #define IEEE80211_STYPE_DEAUTH		0x00C0
 #define IEEE80211_STYPE_ACTION		0x00D0
+#if defined(CS5271)
 #define IEEE80211_STYPE_VERIF           0x00E0
 #define IEEE80211_STYPE_VERIF_RESP      0x00F0
+#endif
 
 /* control */
 #define IEEE80211_STYPE_BACK_REQ	0x0080

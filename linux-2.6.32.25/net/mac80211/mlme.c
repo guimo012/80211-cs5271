@@ -27,6 +27,22 @@
 #include "rate.h"
 #include "led.h"
 
+#if defined(CS5271)
+enum cs5271_deauth_state {
+	CS5271_UNAUTHENTICATED,
+	CS5271_AUTHENTICATED,
+	CS5271_ASSOCIATED,
+	CS5271_AWAITING_DEAUTH_VERIF,
+	CS5271_AWAITING_DEASSOC_VERIF,
+};
+static struct {
+	struct ieee80211_sub_if_data *sdata;
+	struct ieee80211_mgmt *mgmt;
+	size_t skb_len;
+} cs5271_save;
+static int cs5271_state = CS5271_UNAUTHENTICATED;
+#endif
+
 #define IEEE80211_AUTH_TIMEOUT (HZ / 5)
 #define IEEE80211_AUTH_MAX_TRIES 3
 #define IEEE80211_ASSOC_TIMEOUT (HZ / 5)
@@ -432,6 +448,12 @@ static void ieee80211_send_assoc(struct ieee80211_sub_if_data *sdata,
 	}
 
 	ieee80211_tx_skb(sdata, skb, 0);
+
+#if defined(CS5271)
+	printk(KERN_DEBUG, "Sending association request: Guessing it succeeds"
+	       " and setting cs5271_state to ASSOCIATED\n");
+	cs5271_state = CS5271_ASSOCIATED;
+#endif
 }
 
 
@@ -1281,6 +1303,10 @@ static void ieee80211_auth_completed(struct ieee80211_sub_if_data *sdata,
 {
 	wk->state = IEEE80211_MGD_STATE_IDLE;
 	printk(KERN_DEBUG "%s: authenticated\n", sdata->dev->name);
+#if defined(CS5271)
+	printk(KERN_DEBUG "Setting cs5271_auth_state to AUTHENTICATED\n");
+	cs5271_state = CS5271_AUTHENTICATED;
+#endif
 }
 
 
@@ -1920,8 +1946,8 @@ ieee80211_rx_result ieee80211_sta_rx_mgmt(struct ieee80211_sub_if_data *sdata,
 	case IEEE80211_STYPE_AUTH:
 	case IEEE80211_STYPE_ASSOC_RESP:
 	case IEEE80211_STYPE_REASSOC_RESP:
-	case IEEE80211_STYPE_DEAUTH:
 	case IEEE80211_STYPE_DISASSOC:
+	case IEEE80211_STYPE_DEAUTH:
 	case IEEE80211_STYPE_ACTION:
 		skb_queue_tail(&sdata->u.mgd.skb_queue, skb);
 		ieee80211_queue_work(&local->hw, &sdata->u.mgd.work);
@@ -1930,6 +1956,30 @@ ieee80211_rx_result ieee80211_sta_rx_mgmt(struct ieee80211_sub_if_data *sdata,
 
 	return RX_DROP_MONITOR;
 }
+
+#if defined(CS5271)
+static void cs5271_ieee80211_complete_deauth()
+{
+	if (cs5271_state == CS5271_AWAITING_DEAUTH_VERIF)
+	{
+		// Obtain lock
+
+		// Complete deauthorization
+		cfg80211_send_deauth(cs5271_save.sdata->dev, 
+				     (u8 *)cs5271_save.mgmt, 
+				     cs5271_save.skb_len, NULL);
+		cs5271_state == CS5271_UNAUTHENTICATED;
+
+		// Release lock
+	}
+}
+
+/* Need to update arguments to this function */
+static void cs5271_ieee80211_send_verif()
+{
+	
+}
+#endif
 
 static void ieee80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 					 struct sk_buff *skb)
@@ -1959,10 +2009,81 @@ static void ieee80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 			ieee80211_rx_mgmt_probe_resp(sdata, NULL, mgmt,
 						     skb->len, rx_status);
 			break;
+#if defined(CS5271)
+		case IEEE80211_STYPE_VERIF_RESP:
+			/* If we are receiving a VERIF_RESP we probably sent
+			 * out a VERIF previously. Check our current state.
+			 * If we are AWAITING_DEAUTH_VERIF then we do the
+			 * following things:
+			 *     1) Remove the timer
+			 *     2) Change the back to previous state
+			 * In any other case we should just discard this frame.
+			 * Either it arrived too late and we have already 
+			 * deauthenticated/disassociated, or it's just an 
+			 * extraneous frame.
+			 */
+			if (cs5271_state == CS5271_AWAITING_DEAUTH_VERIF)
+			{
+				// Obtain lock here
+
+				// Disable timer
+
+				// Update state
+				cs5271_state = cs5271_prev_state;
+
+				// Release lock
+
+				// Clean up
+				kfree(cs5271_save.mgmt);
+				cs5271_save.sdata   = NULL;
+				cs5271_save.mgmt    = NULL;
+				cs5271_save.skb_len = 0;
+			}
+			break;
+#endif
 		case IEEE80211_STYPE_DEAUTH:
+		{
+#if defined(CS5271)
+			/* If we are currently associated/authenticated we
+			 * first send out a deauth_verif frame and set the
+			 * state to AWAITING_DEAUTH_VERIF. We then set a
+			 * timer. If we process a DEAUTH_VERIF_RESP while
+			 * the state is still AWAITING, we toggle it back to
+			 * AUTHENTICATED/ASSOCIATED. If not, the timer goes 
+			 * off and finished processing the deauthentication
+			 * as normal.
+			 */
+			if (cs5271_state == CS5271_AUTHENTICATED ||
+			    cs5271_state == CS5271_ASSOCIATED)
+			{
+				// Obtain lock here
+
+				// Back up args
+				cs5271_save.sdata   = sdata;
+				cs5271_save.mgmt    = kmalloc(sizeof(*mgmt));
+				memcpy(cs5271_save.mgmt, mgmt, skb->len);
+				cs5271_save.skb_len = skb->len;
+
+				// Set new state
+				cs5271_state = CS5271_AWAITING_DEAUTH_VERIF;
+
+				// Send verification frame
+				cs5271_ieee80211_send_verif();
+
+				// Set timer for response
+				// register function cs5271_ieee80211_complete_deauth() to
+				// be run when the timer fires
+
+				// Release lock
+				
+			}
+			rma = RX_MGMT_NONE;
+#else
 			rma = ieee80211_rx_mgmt_deauth(sdata, NULL,
 						       mgmt, skb->len);
+#endif
 			break;
+		}
 		case IEEE80211_STYPE_DISASSOC:
 			rma = ieee80211_rx_mgmt_disassoc(sdata, mgmt, skb->len);
 			break;
