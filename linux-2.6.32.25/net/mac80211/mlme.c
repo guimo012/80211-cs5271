@@ -22,6 +22,11 @@
 #include <net/mac80211.h>
 #include <asm/unaligned.h>
 
+#if defined(CS5271)
+#include <signal.h>
+#include <sys/time.h>
+#endif
+
 #include "ieee80211_i.h"
 #include "driver-ops.h"
 #include "rate.h"
@@ -1958,7 +1963,7 @@ ieee80211_rx_result ieee80211_sta_rx_mgmt(struct ieee80211_sub_if_data *sdata,
 }
 
 #if defined(CS5271)
-static void cs5271_ieee80211_complete_deauth()
+static void cs5271_ieee80211_complete_deauth(int sig)
 {
 	if (cs5271_state == CS5271_AWAITING_DEAUTH_VERIF)
 	{
@@ -1990,6 +1995,10 @@ static void ieee80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 	struct ieee80211_mgd_work *wk;
 	enum rx_mgmt_action rma = RX_MGMT_NONE;
 	u16 fc;
+#if defined(CS5271)
+	struct sigaction sa;
+	struct itimerval timer;
+#endif
 
 	rx_status = (struct ieee80211_rx_status *) skb->cb;
 	mgmt = (struct ieee80211_mgmt *) skb->data;
@@ -2027,6 +2036,10 @@ static void ieee80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 				// Obtain lock here
 
 				// Disable timer
+				getitimer(ITIMER_REAL, &timer);
+				timer.it_value.tv_sec = 0;
+				timer.it_value.tv_usec = 0;
+				setitimer(ITIMER_REAL, &timer, NULL);
 
 				// Update state
 				cs5271_state = cs5271_prev_state;
@@ -2073,6 +2086,16 @@ static void ieee80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 				// Set timer for response
 				// register function cs5271_ieee80211_complete_deauth() to
 				// be run when the timer fires
+				/* Install timer_handler as the signal handler for SIGVTALRM. */
+				sigemptyset(&sa.sa_mask);
+				sa.sa_flags = 0;
+				sa.sa_handler = cs5271_ieee80211_complete_deauth;
+				sigaction (SIGALRM, &sa, NULL);
+
+				/* Configure the timer to expire after 100 msec. */
+				timer.it_value.tv_sec = 0;
+				timer.it_value.tv_usec = 100000;
+				setitimer(ITIMER_REAL, &timer, NULL);
 
 				// Release lock
 				
