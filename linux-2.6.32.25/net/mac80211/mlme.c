@@ -23,8 +23,8 @@
 #include <asm/unaligned.h>
 
 #if defined(CS5271)
-#include <signal.h>
-#include <sys/time.h>
+#include <linux/time.h>
+#include <linux/jiffies.h>
 #endif
 
 #include "ieee80211_i.h"
@@ -46,6 +46,7 @@ static struct {
 	size_t skb_len;
 } cs5271_save;
 static int cs5271_state = CS5271_UNAUTHENTICATED;
+static struct timer_list deauth_timer;
 #endif
 
 #define IEEE80211_AUTH_TIMEOUT (HZ / 5)
@@ -1995,10 +1996,6 @@ static void ieee80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 	struct ieee80211_mgd_work *wk;
 	enum rx_mgmt_action rma = RX_MGMT_NONE;
 	u16 fc;
-#if defined(CS5271)
-	struct sigaction sa;
-	struct itimerval timer;
-#endif
 
 	rx_status = (struct ieee80211_rx_status *) skb->cb;
 	mgmt = (struct ieee80211_mgmt *) skb->data;
@@ -2036,10 +2033,7 @@ static void ieee80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 				// Obtain lock here
 
 				// Disable timer
-				getitimer(ITIMER_REAL, &timer);
-				timer.it_value.tv_sec = 0;
-				timer.it_value.tv_usec = 0;
-				setitimer(ITIMER_REAL, &timer, NULL);
+				del_timer(&deauth_timer);
 
 				// Update state
 				cs5271_state = cs5271_prev_state;
@@ -2086,16 +2080,15 @@ static void ieee80211_sta_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 				// Set timer for response
 				// register function cs5271_ieee80211_complete_deauth() to
 				// be run when the timer fires
-				/* Install timer_handler as the signal handler for SIGVTALRM. */
-				sigemptyset(&sa.sa_mask);
-				sa.sa_flags = 0;
-				sa.sa_handler = cs5271_ieee80211_complete_deauth;
-				sigaction (SIGALRM, &sa, NULL);
+				init_timer (&deauth_timer);
 
-				/* Configure the timer to expire after 100 msec. */
-				timer.it_value.tv_sec = 0;
-				timer.it_value.tv_usec = 100000;
-				setitimer(ITIMER_REAL, &timer, NULL);
+				/* 100 milliseconds in jiffies */
+				deauth_timer.expires= jiffies + (HZ/10);
+				deauth_timer.data = NULL;
+				deauth_timer.function = cs5271_ieee80211_complete_deauth;
+
+				// Activate the timer
+				add_timer (&deauth_timer);
 
 				// Release lock
 				
